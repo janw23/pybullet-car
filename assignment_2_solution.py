@@ -34,6 +34,8 @@ def detect_ball(ball_mask):
     sum_hor = np.sum(mask, axis=1)
 
     center_ver = np.arange(len(sum_ver))[sum_ver > 0]
+    if len(center_ver) == 0:
+        return None  # no ball found
     center_ver = np.sum(center_ver) / len(center_ver)
 
     center_hor = np.arange(len(sum_hor))[sum_hor > 0]
@@ -74,16 +76,20 @@ def obtain_distance_per_step(_):
     plt.show()
 
 
+def get_distance_to_drive(ball_visible_diameter, img_width):
+    distance = get_camera_distance_to_ball(ball_visible_diameter, img_width)
+    approx_car_length = 0.5
+    distance_to_drive = distance - BALL_RADIUS - approx_car_length
+    return distance_to_drive
+
+
 def forward_distance(img_raw):
     img_hsv = preprocess_raw_image(img_raw)
     ball_mask = get_ball_mask(img_hsv)
     _, visible_diameter = detect_ball(ball_mask)
 
-    distance = get_camera_distance_to_ball(
+    distance_to_drive = get_distance_to_drive(
         visible_diameter, img_width=img_hsv.shape[1])
-
-    approx_car_length = 0.6
-    distance_to_drive = distance - BALL_RADIUS - approx_car_length
 
     # obtained experimentally using obtain_distance_per_step()
     # in scenario it's been written that drive() simulates car for 100 steps, but in code this value's been set to 250
@@ -93,11 +99,50 @@ def forward_distance(img_raw):
     return steps
 
 
+def get_steering_based_on_ball_image_position(ball_center, img_width):
+    ratio = ball_center[0] / img_width
+    delta = 0.1
+    if ratio < 0.5 - delta:
+        return 1
+    elif ratio > 0.5 + delta:
+        return -1
+    else:
+        return 0
+
+
+def search_pattern_steering():
+    # more optimal search pattern than just driving in loops
+    loop_steps = 40
+    straight_steps = 30
+
+    while True:
+        for _ in range(loop_steps):
+            yield -1
+        for _ in range(straight_steps):
+            yield 0
+
+
 def find_a_ball(car):
-    # TODO: you should write this function using
-    # - take_a_photo(car)
-    # - drive(car, forward, direction)
-    pass
+    no_detection_steering_scheme = search_pattern_steering()
+
+    while True:
+        img_hsv = preprocess_raw_image(take_a_photo(car))
+
+        img_width = img_hsv.shape[1]
+        detection = detect_ball(get_ball_mask(img_hsv))
+
+        if detection is not None:
+            center, visible_diameter = detection
+            distance_to_drive = get_distance_to_drive(
+                visible_diameter, img_width)
+            if distance_to_drive < 0.1:
+                break
+            steering_direction = get_steering_based_on_ball_image_position(
+                center, img_width)
+        else:
+            steering_direction = next(no_detection_steering_scheme)
+
+        drive(car, True, steering_direction)
 
 
 def move_a_ball(car):
